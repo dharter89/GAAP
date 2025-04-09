@@ -34,7 +34,7 @@ def generate_pdf(title, content):
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, title, ln=True)
     pdf.set_font("Arial", size=12)
-    for line in content.split("\n"):
+    for line in content.split("\\n"):
         pdf.multi_cell(0, 10, line)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     pdf.output(tmp.name)
