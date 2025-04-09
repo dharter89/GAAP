@@ -77,14 +77,10 @@ Analyze the uploaded {file_type} for:
 - Itemize **every** infraction found (not just a few examples)
 
 🧠 Special Instructions:
-- This file was exported from QuickBooks. Many rows are **bold parent account headers** or **section titles**.
-- These rows may:
-  - Appear **without any dollar amount**
-  - Appear **with blank or generic account names**
-  - Be used as **group rollups** (e.g., "Operating Expenses", "Utilities")
-- Do **not flag these header rows as GAAP errors.**
-- Only flag issues on rows that reflect **posting-level account detail**, **summed balances**, or **mapped financial outcomes.**
-- Missing data is **not a violation** if the row is clearly a structural or subtotal row.
+- Do **NOT** flag rows as errors if the row contains **no dollar values or all zero values**. These are likely header rows or section titles from QuickBooks.
+- The exported data uses the **“Show non-zero rows/columns”** option. So blank or zero-only rows are likely intentional formatting elements.
+- Only assess rows that contain financial figures and reflect actual posting-level detail.
+- Do not deduct points for section headers or subtotal lines that have no amounts.
 
 At the top of your response, assign a GAAP Compliance Grade from A to F:
 - A: Fully compliant, no material issues
@@ -98,8 +94,6 @@ Return your response in clean markdown. Use headers and bullet points.
 Here is the uploaded data:
 {df.to_string(index=False)}
 """
-
-
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
