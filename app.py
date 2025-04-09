@@ -64,6 +64,10 @@ def load_excel(file, sheet_name=None):
 @st.cache_data(show_spinner=False)
 def run_single_statement_analysis(df, file_type):
     df = truncate_df(df)
+    # Pre-clean the DataFrame to remove subtotal and header rows
+    df = df[~df["Account"].astype(str).str.contains("Total", case=False, na=False)]
+    df = df[df.select_dtypes(include=['number']).sum(axis=1) != 0]
+
     prompt = f"""
 You are an Ivy League-trained CPA and GAAP compliance expert.
 
@@ -82,6 +86,9 @@ Analyze the uploaded {file_type} for:
 - **Ignore any row where all numeric values are zero or blank** — these are usually parent account headers.
 - Only assess rows that include real posting-level amounts or financial classification errors.
 - Do not deduct points for subtotal rows, headers, or grouping lines.
+- Do NOT flag rows as errors if:
+  - The "Account" name contains the word "Total"
+  - The row contains no numeric values or only zeros
 
 At the top of your response, assign a GAAP Compliance Grade from A to F:
 - A: Fully compliant, no material issues
