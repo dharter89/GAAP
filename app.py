@@ -3,6 +3,14 @@ import pandas as pd
 from openai import OpenAI
 from fpdf import FPDF
 import tempfile
+from PIL import Image
+
+# Load and display logo
+try:
+    logo = Image.open("ValiantLogWhite.png")
+    st.image(logo, width=180)
+except FileNotFoundError:
+    st.warning("⚠️ Company logo not found. Make sure 'ValiantLogWhite.png' is in your repo.")
 
 # Load OpenAI key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -17,25 +25,37 @@ DEFAULT_HEADER_ROW = 6
 # Tries to detect the first valid header row
 def detect_header_row(df):
     for i, row in df.iterrows():
-        if row.notnull().sum() >= 3:
+        if row.notnull().sum() >= 3:  # Heuristic: valid headers usually have 3+ non-null entries
             return i
     return DEFAULT_HEADER_ROW
 
 # Load Excel file with QB-aware fallback and data cleanup
 def load_excel(file, sheet_name=None):
     try:
+        # Load preview without assuming sheet_name is set
         preview = pd.read_excel(file, sheet_name=sheet_name, header=None)
+
+        # If multiple sheets returned, use the first one
         if isinstance(preview, dict):
             sheet_name = list(preview.keys())[0]
             preview = preview[sheet_name]
+
         header_row = detect_header_row(preview)
+
+        # Read the actual data skipping to the detected header
         df = pd.read_excel(file, sheet_name=sheet_name, skiprows=header_row)
+
+        # Clean up the DataFrame
         df.columns = df.columns.astype(str).str.strip()
-        df = df.dropna(axis=1, how='all')
-        df = df.dropna(axis=0, how='all')
+        df = df.dropna(axis=1, how='all')  # drop empty cols
+        df = df.dropna(axis=0, how='all')  # drop empty rows
+
+        # Attempt numeric conversion
         for col in df.select_dtypes(include='object').columns:
             df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "").str.strip(), errors='ignore')
+
         return df
+
     except Exception as e:
         st.error(f"❌ Failed to load Excel file: {e}")
         raise
@@ -80,13 +100,8 @@ Here is the uploaded data:
 def generate_pdf_report(title, content):
     pdf = FPDF()
     pdf.add_page()
-    try:
-        pdf.image("ValiantLogWhite.png", x=10, y=8, w=33)
-    except:
-        pass
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_font("Arial", size=12)
-    pdf.ln(20)
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, title, ln=True)
     pdf.set_font("Arial", size=12)
@@ -97,31 +112,9 @@ def generate_pdf_report(title, content):
     return temp_file.name
 
 # Streamlit UI
-st.set_page_config(page_title="GAAP Compliance Checker - Valiant Partners", layout="wide")
-st.image("logo.png", width=160)
-st.markdown("""
-    <style>
-    .main {
-        background-color: #f9f9f9;
-    }
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
-    }
-    .stApp {
-        font-family: 'Helvetica Neue', sans-serif;
-        color: #111;
-    }
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        color: #003366;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("💼 GAAP Compliance Checker – Valiant Partners")
-st.caption("Precision-grade audits with institutional clarity. Upload one or more Excel-based financial statements for an AI-driven GAAP compliance assessment.")
+st.set_page_config(page_title="GAAP Compliance Checker (Batch)", layout="wide")
+st.title("📘 GAAP Compliance Checker - Batch Mode")
+st.caption("Upload and audit multiple statements for GAAP compliance with AI-generated JEs and raw data snapshots.")
 
 uploaded_files = st.file_uploader("📤 Upload Financial Statements (.xlsx, .xls)", type=["xlsx", "xls"], accept_multiple_files=True)
 
