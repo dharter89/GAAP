@@ -2,13 +2,13 @@ import os
 import streamlit as st
 import pandas as pd
 from openai import OpenAI
-from utils import (
+
+from gaap_audit.utils import (
     load_verified_memory, clean_df, generate_pdf,
     calculate_grade, save_verified_memory
 )
-from ai import run_gaap_audit
-from ui import handle_violation_checkboxes
-
+from gaap_audit.ai import run_gaap_audit
+from gaap_audit.ui import handle_violation_checkboxes
 
 st.set_page_config(page_title="GAAP Checker", layout="wide", page_icon="📘")
 
