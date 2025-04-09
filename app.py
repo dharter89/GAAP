@@ -76,6 +76,16 @@ Analyze the uploaded {file_type} for:
 - Include an appendix summarizing the raw data rows tied to each issue
 - Itemize **every** infraction found (not just a few examples)
 
+🧠 Special Instructions:
+- This file was exported from QuickBooks. Many rows are **bold parent account headers** or **section titles**.
+- These rows may:
+  - Appear **without any dollar amount**
+  - Appear **with blank or generic account names**
+  - Be used as **group rollups** (e.g., "Operating Expenses", "Utilities")
+- Do **not flag these header rows as GAAP errors.**
+- Only flag issues on rows that reflect **posting-level account detail**, **summed balances**, or **mapped financial outcomes.**
+- Missing data is **not a violation** if the row is clearly a structural or subtotal row.
+
 At the top of your response, assign a GAAP Compliance Grade from A to F:
 - A: Fully compliant, no material issues
 - B: Minor issues or suggestions
@@ -88,6 +98,8 @@ Return your response in clean markdown. Use headers and bullet points.
 Here is the uploaded data:
 {df.to_string(index=False)}
 """
+
+
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
