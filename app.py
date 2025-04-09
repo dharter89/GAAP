@@ -1,6 +1,5 @@
-import streamlit as st
-
 # ⚙️ Must be first Streamlit call
+import streamlit as st
 st.set_page_config(
     page_title="GAAP Compliance Checker (Batch)",
     layout="wide",
