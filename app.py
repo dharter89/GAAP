@@ -7,74 +7,72 @@ import os
 import json
 from PIL import Image
 
-# 🖼️ Set page config early
-st.set_page_config(page_title="GAAP Compliance Checker", layout="wide", page_icon="📘")
+# ✅ Config
+st.set_page_config(page_title="GAAP Checker", layout="wide", page_icon="📘")
 
-# 🏢 Display logo
-logo_path = "ValiantLogWhite.png"
-if os.path.exists(logo_path):
-    st.image(Image.open(logo_path), width=160)
+# 🖼️ Logo
+if os.path.exists("ValiantLogWhite.png"):
+    st.image("ValiantLogWhite.png", width=160)
 
-# 🔑 OpenAI API
+# 🔑 OpenAI Key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# 📂 Load verified memory
-memory_file = "verified_issues.json"
-if os.path.exists(memory_file):
-    with open(memory_file, "r") as f:
+# 💾 Persistent Verified Memory
+MEMORY_FILE = "verified_issues.json"
+if os.path.exists(MEMORY_FILE):
+    with open(MEMORY_FILE, "r") as f:
         verified_memory = json.load(f)
 else:
     verified_memory = {}
 
-# 📉 Clean dataframe (ignore header/total/blank rows)
+# 🧹 Clean rows (ignore totals, headers, blanks)
 def clean_df(df):
     df = df.dropna(how='all')
-    df = df.loc[~df.apply(lambda row: row.astype(str).str.lower().str.contains("total|header|subtotal").any(), axis=1)]
+    df = df.loc[~df.apply(lambda r: r.astype(str).str.lower().str.contains("total|header|subtotal").any(), axis=1)]
     df = df.loc[~df.iloc[:, 0].astype(str).str.strip().eq('')]
     return df
 
-# ✂️ Limit rows to avoid token overflow
+# ✂️ Truncate for prompt size
 def truncate_df(df, max_rows=50):
     return df.head(max_rows) if df.shape[0] > max_rows else df
 
-# 🧠 AI audit logic
-@st.cache_data(show_spinner=False)
+# 🧠 GAAP Audit Prompt
 def run_gaap_audit(df, file_type, file_key):
     df = truncate_df(clean_df(df))
     prompt = f"""
-You are a GAAP expert CPA.
+You are an Ivy League-trained CPA and GAAP compliance expert.
 
-Review the uploaded {file_type} for:
+Analyze the uploaded {file_type} for the following:
 - GAAP violations
 - Classification errors
-- Misplaced accounts
-- Missing data
-- Show exact line items and reasoning
+- Missing or misclassified accounts
+- Improper use of chart of accounts
+- Missing required disclosures
 
-Format:
-Violation: [message]
-Suggested Fix: [journal entry or classification]
+For each issue:
+- Start with `Violation: ...`
+- Then include:
+  - Reason: why this violates GAAP (include ASC reference if applicable)
+  - Suggested Fix: write a correct journal entry
+  - Example: sample correction
+  - ASC Reference: cite the GAAP rule
 
-Here is the data:
+At the bottom, assign a grade from A–F based on severity.
+
+Here is the uploaded data:
 {df.to_string(index=False)}
 """
-
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
         max_tokens=1800
     )
+    full_text = response.choices[0].message.content
+    violations = [line for line in full_text.splitlines() if line.strip().lower().startswith("violation:")]
+    return full_text, violations
 
-    report = response.choices[0].message.content
-
-    # Parse violations
-    lines = report.split("\n")
-    violations = [line for line in lines if line.strip().lower().startswith("violation:")]
-
-    return report, violations
-
-# 🧾 PDF Export
+# 📝 PDF Generation
 def generate_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -87,11 +85,11 @@ def generate_pdf(title, content):
     pdf.output(tmp.name)
     return tmp.name
 
-# 🚀 Streamlit App
+# 🎛️ App UI
 st.title("📘 GAAP Compliance Checker - Batch Mode")
-st.caption("Upload reports. Flag violations. Track memory.")
+st.caption("Audit files, review GAAP issues, verify false positives, and export clean summaries.")
 
-files = st.file_uploader("📤 Upload Financial Statements", type=["xlsx", "xls"], accept_multiple_files=True)
+files = st.file_uploader("📤 Upload Financials", type=["xlsx", "xls"], accept_multiple_files=True)
 
 if files:
     for f in files:
@@ -102,51 +100,55 @@ if files:
         st.dataframe(df_clean, use_container_width=True)
 
         if st.button(f"🔍 Run GAAP Audit on {file_key}"):
-            with st.spinner("Analyzing..."):
-                audit_text, issues = run_gaap_audit(df_clean, "Financial Report", file_key)
+            with st.spinner("Analyzing with GPT..."):
+                audit_text, violations = run_gaap_audit(df_clean, "General Ledger", file_key)
 
-                st.markdown("### ✅ Raw AI Audit Report")
-                verified = verified_memory.get(file_key, [])
+                st.markdown("### 🧾 AI Audit Report (Detailed)")
+                st.markdown(audit_text)
+
+                st.markdown("### 🛠 GAAP Violations Checklist")
+                session_key = f"verified::{file_key}"
+                if session_key not in st.session_state:
+                    st.session_state[session_key] = {}
 
                 outstanding = []
-                updated_issues = []
-                for i, issue in enumerate(issues):
-                    key = f"{file_key}::{issue.strip()}"
-                    checked = key in verified
+                for v in violations:
+                    v_key = f"{file_key}::{v}"
+                    checked = v_key in verified_memory.get(file_key, [])
                     if not checked:
-                        outstanding.append(issue)
-                    if st.checkbox(issue.strip(), key=key, value=checked):
-                        updated_issues.append(key)
+                        outstanding.append(v)
+                    st.session_state[session_key][v] = st.checkbox(v, value=checked, key=v_key)
 
-                verified_memory[file_key] = updated_issues
-                with open(memory_file, "w") as f:
+                # Update memory
+                new_verified = [v for v, chk in st.session_state[session_key].items() if chk]
+                verified_memory[file_key] = [f"{file_key}::{v}" for v in new_verified]
+                with open(MEMORY_FILE, "w") as f:
                     json.dump(verified_memory, f, indent=2)
 
-                # Grade
-                total = len(issues)
-                unresolved = len(outstanding)
-                if total == 0:
+                # Grade logic
+                unresolved = [v for v in violations if not st.session_state[session_key].get(v)]
+                num_unresolved = len(unresolved)
+                if num_unresolved == 0:
                     grade = "A"
-                elif unresolved == 0:
-                    grade = "A"
-                elif unresolved <= 2:
+                elif num_unresolved <= 2:
                     grade = "B"
-                elif unresolved <= 5:
+                elif num_unresolved <= 5:
                     grade = "C"
-                elif unresolved <= 8:
+                elif num_unresolved <= 8:
                     grade = "D"
                 else:
                     grade = "F"
 
-                st.markdown(f"### 📊 Updated GAAP Grade: **{grade}** ({unresolved} outstanding issues)")
+                st.markdown(f"### 📊 Updated GAAP Grade: `{grade}` ({num_unresolved} unresolved issues)")
 
-                pdf = generate_pdf(f"{file_key} GAAP Audit", audit_text)
-                with open(pdf, "rb") as pdf_file:
-                    st.download_button(
-                        label="📄 Download Updated PDF Report",
-                        data=pdf_file,
-                        file_name=f"{file_key}_GAAP_Audit.pdf",
-                        mime="application/pdf"
-                    )
-else:
-    st.info("Upload one or more financial reports to get started.")
+                if st.button("📥 Download Final PDF"):
+                    report_summary = "\n".join([f"- {v}" for v in unresolved])
+                    pdf_text = f"GAAP Audit Report: {file_key}\n\nOutstanding Violations:\n{report_summary}\n\nFinal Grade: {grade}"
+                    pdf_path = generate_pdf(f"{file_key} GAAP Audit", pdf_text)
+                    with open(pdf_path, "rb") as f:
+                        st.download_button(
+                            label="📄 Download PDF",
+                            data=f,
+                            file_name=f"{file_key}_GAAP_Audit.pdf",
+                            mime="application/pdf"
+                        )
