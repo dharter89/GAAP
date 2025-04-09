@@ -24,10 +24,21 @@ def detect_header_row(df):
 # Load Excel file with QB-aware fallback
 def load_excel(file, sheet_name=None):
     try:
+        # Load preview without assuming sheet_name is set
         preview = pd.read_excel(file, sheet_name=sheet_name, header=None)
+
+        # If multiple sheets returned, use the first one
+        if isinstance(preview, dict):
+            sheet_name = list(preview.keys())[0]
+            preview = preview[sheet_name]
+
         header_row = detect_header_row(preview)
+
+        # Read the actual data skipping to the detected header
         result = pd.read_excel(file, sheet_name=sheet_name, skiprows=header_row)
+
         return result
+
     except Exception as e:
         st.error(f"❌ Failed to load Excel file: {e}")
         raise
