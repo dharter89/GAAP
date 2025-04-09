@@ -7,18 +7,32 @@ import tempfile
 # Load OpenAI key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Utility: Truncate dataframe to avoid token overflow
+# Truncate dataframe to avoid token overflow
 def truncate_df(df, max_rows=50):
     return df.head(max_rows) if df.shape[0] > max_rows else df
 
-# Load Excel file with sheet logic
-def load_excel(file, sheet_name=None):
-    result = pd.read_excel(file, sheet_name=sheet_name)
-    if isinstance(result, dict) and sheet_name:
-        result = result[sheet_name]
-    return result
+# Auto-detect header row or fallback to QuickBooks default row
+DEFAULT_HEADER_ROW = 6
 
-# Dynamic prompt builder
+# Tries to detect the first valid header row
+def detect_header_row(df):
+    for i, row in df.iterrows():
+        if row.notnull().sum() >= 3:  # Heuristic: valid headers usually have 3+ non-null entries
+            return i
+    return DEFAULT_HEADER_ROW
+
+# Load Excel file with QB-aware fallback
+def load_excel(file, sheet_name=None):
+    try:
+        preview = pd.read_excel(file, sheet_name=sheet_name, header=None)
+        header_row = detect_header_row(preview)
+        result = pd.read_excel(file, sheet_name=sheet_name, skiprows=header_row)
+        return result
+    except Exception as e:
+        st.error(f"❌ Failed to load Excel file: {e}")
+        raise
+
+# Generate AI analysis
 @st.cache_data(show_spinner=False)
 def run_single_statement_analysis(df, file_type):
     df = truncate_df(df)
@@ -52,13 +66,11 @@ def generate_pdf_report(title, content):
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_font("Arial", size=12)
-
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, title, ln=True)
     pdf.set_font("Arial", size=12)
     for line in content.split('\n'):
         pdf.multi_cell(0, 10, line)
-
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     pdf.output(temp_file.name)
     return temp_file.name
