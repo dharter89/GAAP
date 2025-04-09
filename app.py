@@ -12,9 +12,17 @@ def truncate_df(df, max_rows=50):
 # Load Excel file with sheet logic
 def load_excel(file, sheet_name=None):
     result = pd.read_excel(file, sheet_name=sheet_name)
-    if isinstance(result, dict) and sheet_name:
-        result = result[sheet_name]
+    
+    # If a dict is returned (multiple sheets), select the first one unless specified
+    if isinstance(result, dict):
+        if sheet_name:
+            result = result.get(sheet_name)
+        else:
+            # Default to the first sheet if no sheet_name is passed
+            result = next(iter(result.values()))
+    
     return result
+
 
 # Dynamic prompt builder
 @st.cache_data(show_spinner=False)
