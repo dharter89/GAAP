@@ -39,7 +39,7 @@ General Ledger:
 {gl_df.to_string(index=False)}
 """
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-3.5-turbo-16k",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
         max_tokens=1800
