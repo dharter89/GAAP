@@ -6,7 +6,11 @@ import openai
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 def load_excel(file, sheet_name):
-    return pd.read_excel(file, sheet_name=sheet_name)
+    result = pd.read_excel(file, sheet_name=sheet_name)
+    if isinstance(result, dict):
+        result = result[sheet_name]
+    return result
+
 
 def run_gaap_ai_advisor(bs_df, pl_df, cf_df, gl_df):
     prompt = f"""
