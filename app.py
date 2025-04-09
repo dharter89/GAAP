@@ -5,7 +5,6 @@ from fpdf import FPDF
 import tempfile
 import os
 import json
-from PIL import Image
 
 # ✅ Config
 st.set_page_config(page_title="GAAP Checker", layout="wide", page_icon="📘")
@@ -14,16 +13,21 @@ st.set_page_config(page_title="GAAP Checker", layout="wide", page_icon="📘")
 if os.path.exists("ValiantLogWhite.png"):
     st.image("ValiantLogWhite.png", width=160)
 
-# 🔑 OpenAI Key
+# 🔑 OpenAI Client
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# 💾 Persistent Verified Memory
+# 💾 Verified Violations Memory
 MEMORY_FILE = "verified_issues.json"
-if os.path.exists(MEMORY_FILE):
-    with open(MEMORY_FILE, "r") as f:
-        verified_memory = json.load(f)
-else:
-    verified_memory = {}
+
+def load_verified_memory():
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_verified_memory(memory):
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(memory, f, indent=2)
 
 # 🧹 Clean rows (ignore totals, headers, blanks)
 def clean_df(df):
@@ -32,12 +36,11 @@ def clean_df(df):
     df = df.loc[~df.iloc[:, 0].astype(str).str.strip().eq('')]
     return df
 
-# ✂️ Truncate for prompt size
 def truncate_df(df, max_rows=50):
     return df.head(max_rows) if df.shape[0] > max_rows else df
 
 # 🧠 GAAP Audit Prompt
-def run_gaap_audit(df, file_type, file_key):
+def run_gaap_audit(client, df, file_type):
     df = truncate_df(clean_df(df))
     prompt = f"""
 You are an Ivy League-trained CPA and GAAP compliance expert.
@@ -69,7 +72,7 @@ Here is the uploaded data:
         max_tokens=1800
     )
     full_text = response.choices[0].message.content
-    violations = [line for line in full_text.splitlines() if line.strip().lower().startswith("violation:")]
+    violations = [line.strip() for line in full_text.splitlines() if line.lower().startswith("violation:")]
     return full_text, violations
 
 # 📝 PDF Generation
@@ -85,10 +88,47 @@ def generate_pdf(title, content):
     pdf.output(tmp.name)
     return tmp.name
 
-# 🎛️ App UI
+# 🛠 Checkbox Handler
+def handle_violation_checkboxes(file_key, violations, verified_memory):
+    session_key = f"verified::{file_key}"
+    if session_key not in st.session_state:
+        st.session_state[session_key] = {}
+
+    if file_key not in verified_memory:
+        verified_memory[file_key] = []
+
+    outstanding = []
+    for v in violations:
+        checkbox_key = f"{session_key}::{v}"
+        checked = v in verified_memory[file_key]
+        state = st.checkbox(v, value=checked, key=checkbox_key)
+        st.session_state[session_key][v] = state
+        if not state:
+            outstanding.append(v)
+
+    # Update and save
+    verified_memory[file_key] = [v for v, chk in st.session_state[session_key].items() if chk]
+    save_verified_memory(verified_memory)
+
+    return outstanding
+
+# 📊 Grading
+def calculate_grade(unresolved_count):
+    if unresolved_count == 0:
+        return "A"
+    elif unresolved_count <= 2:
+        return "B"
+    elif unresolved_count <= 5:
+        return "C"
+    elif unresolved_count <= 8:
+        return "D"
+    return "F"
+
+# 🎛️ Streamlit UI
 st.title("📘 GAAP Compliance Checker - Batch Mode")
 st.caption("Audit files, review GAAP issues, verify false positives, and export clean summaries.")
 
+verified_memory = load_verified_memory()
 files = st.file_uploader("📤 Upload Financials", type=["xlsx", "xls"], accept_multiple_files=True)
 
 if files:
@@ -101,45 +141,16 @@ if files:
 
         if st.button(f"🔍 Run GAAP Audit on {file_key}"):
             with st.spinner("Analyzing with GPT..."):
-                audit_text, violations = run_gaap_audit(df_clean, "General Ledger", file_key)
+                audit_text, violations = run_gaap_audit(client, df_clean, "General Ledger")
 
                 st.markdown("### 🧾 AI Audit Report (Detailed)")
                 st.markdown(audit_text)
 
                 st.markdown("### 🛠 GAAP Violations Checklist")
-                session_key = f"verified::{file_key}"
-                if session_key not in st.session_state:
-                    st.session_state[session_key] = {}
+                unresolved = handle_violation_checkboxes(file_key, violations, verified_memory)
 
-                outstanding = []
-                for v in violations:
-                    v_key = f"{file_key}::{v}"
-                    checked = v_key in verified_memory.get(file_key, [])
-                    if not checked:
-                        outstanding.append(v)
-                    st.session_state[session_key][v] = st.checkbox(v, value=checked, key=v_key)
-
-                # Update memory
-                new_verified = [v for v, chk in st.session_state[session_key].items() if chk]
-                verified_memory[file_key] = [f"{file_key}::{v}" for v in new_verified]
-                with open(MEMORY_FILE, "w") as f:
-                    json.dump(verified_memory, f, indent=2)
-
-                # Grade logic
-                unresolved = [v for v in violations if not st.session_state[session_key].get(v)]
-                num_unresolved = len(unresolved)
-                if num_unresolved == 0:
-                    grade = "A"
-                elif num_unresolved <= 2:
-                    grade = "B"
-                elif num_unresolved <= 5:
-                    grade = "C"
-                elif num_unresolved <= 8:
-                    grade = "D"
-                else:
-                    grade = "F"
-
-                st.markdown(f"### 📊 Updated GAAP Grade: `{grade}` ({num_unresolved} unresolved issues)")
+                grade = calculate_grade(len(unresolved))
+                st.markdown(f"### 📊 Updated GAAP Grade: `{grade}` ({len(unresolved)} unresolved issues)")
 
                 if st.button("📥 Download Final PDF"):
                     report_summary = "\n".join([f"- {v}" for v in unresolved])
