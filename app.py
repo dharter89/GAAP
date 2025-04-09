@@ -21,7 +21,7 @@ def detect_header_row(df):
             return i
     return DEFAULT_HEADER_ROW
 
-# Load Excel file with QB-aware fallback
+# Load Excel file with QB-aware fallback and data cleanup
 def load_excel(file, sheet_name=None):
     try:
         # Load preview without assuming sheet_name is set
@@ -35,9 +35,18 @@ def load_excel(file, sheet_name=None):
         header_row = detect_header_row(preview)
 
         # Read the actual data skipping to the detected header
-        result = pd.read_excel(file, sheet_name=sheet_name, skiprows=header_row)
+        df = pd.read_excel(file, sheet_name=sheet_name, skiprows=header_row)
 
-        return result
+        # Clean up the DataFrame
+        df.columns = df.columns.astype(str).str.strip()
+        df = df.dropna(axis=1, how='all')  # drop empty cols
+        df = df.dropna(axis=0, how='all')  # drop empty rows
+
+        # Attempt numeric conversion
+        for col in df.select_dtypes(include='object').columns:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "").str.strip(), errors='ignore')
+
+        return df
 
     except Exception as e:
         st.error(f"❌ Failed to load Excel file: {e}")
@@ -57,6 +66,14 @@ Analyze the uploaded {file_type} for:
 - References to ASC (GAAP) standards
 - For each issue, include a suggested journal entry (debit/credit, account name, amount)
 - Include an appendix summarizing the raw data rows tied to each issue
+- Itemize **every** infraction found (not just a few examples)
+
+At the top of your response, assign a GAAP Compliance Grade from A to F:
+- A: Fully compliant, no material issues
+- B: Minor issues or suggestions
+- C: Moderate GAAP issues, requires adjustments
+- D: Significant errors or recurring issues
+- F: Critical violations, potential misstatements
 
 Return your response in clean markdown. Use headers and bullet points.
 
