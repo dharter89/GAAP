@@ -29,7 +29,7 @@ def save_verified_memory(memory):
     with open(MEMORY_FILE, "w") as f:
         json.dump(memory, f, indent=2)
 
-# 🧹 Clean rows (ignore totals, headers, blanks)
+# 🧹 Clean & Truncate DataFrame
 def clean_df(df):
     df = df.dropna(how='all')
     df = df.loc[~df.apply(lambda r: r.astype(str).str.lower().str.contains("total|header|subtotal").any(), axis=1)]
@@ -39,7 +39,7 @@ def clean_df(df):
 def truncate_df(df, max_rows=50):
     return df.head(max_rows) if df.shape[0] > max_rows else df
 
-# 🧠 GAAP Audit Prompt
+# 🤖 GAAP Audit
 def run_gaap_audit(client, df, file_type):
     df = truncate_df(clean_df(df))
     prompt = f"""
@@ -75,7 +75,7 @@ Here is the uploaded data:
     violations = [line.strip() for line in full_text.splitlines() if line.lower().startswith("violation:")]
     return full_text, violations
 
-# 📝 PDF Generation
+# 📄 PDF Generator
 def generate_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -88,7 +88,7 @@ def generate_pdf(title, content):
     pdf.output(tmp.name)
     return tmp.name
 
-# 🛠 Checkbox Handler
+# 📋 Checkbox Management
 def handle_violation_checkboxes(file_key, violations, verified_memory):
     session_key = f"verified::{file_key}"
     if session_key not in st.session_state:
@@ -106,13 +106,13 @@ def handle_violation_checkboxes(file_key, violations, verified_memory):
         if not state:
             outstanding.append(v)
 
-    # Update and save
+    # Save updated memory
     verified_memory[file_key] = [v for v, chk in st.session_state[session_key].items() if chk]
     save_verified_memory(verified_memory)
 
     return outstanding
 
-# 📊 Grading
+# 🧮 Grading
 def calculate_grade(unresolved_count):
     if unresolved_count == 0:
         return "A"
@@ -124,7 +124,7 @@ def calculate_grade(unresolved_count):
         return "D"
     return "F"
 
-# 🎛️ Streamlit UI
+# 🚀 Streamlit App UI
 st.title("📘 GAAP Compliance Checker - Batch Mode")
 st.caption("Audit files, review GAAP issues, verify false positives, and export clean summaries.")
 
@@ -139,27 +139,40 @@ if files:
         df_clean = clean_df(df)
         st.dataframe(df_clean, use_container_width=True)
 
-        if st.button(f"🔍 Run GAAP Audit on {file_key}"):
-            with st.spinner("Analyzing with GPT..."):
-                audit_text, violations = run_gaap_audit(client, df_clean, "General Ledger")
+        audit_state_key = f"{file_key}_audit"
+        run_button_label = f"🔍 Run GAAP Audit on {file_key}"
 
-                st.markdown("### 🧾 AI Audit Report (Detailed)")
-                st.markdown(audit_text)
+        if audit_state_key not in st.session_state:
+            if st.button(run_button_label):
+                with st.spinner("Analyzing with GPT..."):
+                    audit_text, violations = run_gaap_audit(client, df_clean, "General Ledger")
+                    st.session_state[audit_state_key] = {
+                        "text": audit_text,
+                        "violations": violations
+                    }
 
-                st.markdown("### 🛠 GAAP Violations Checklist")
-                unresolved = handle_violation_checkboxes(file_key, violations, verified_memory)
+        if audit_state_key in st.session_state:
+            audit_data = st.session_state[audit_state_key]
+            audit_text = audit_data["text"]
+            violations = audit_data["violations"]
 
-                grade = calculate_grade(len(unresolved))
-                st.markdown(f"### 📊 Updated GAAP Grade: `{grade}` ({len(unresolved)} unresolved issues)")
+            st.markdown("### 🧾 AI Audit Report (Detailed)")
+            st.markdown(audit_text)
 
-                if st.button("📥 Download Final PDF"):
-                    report_summary = "\n".join([f"- {v}" for v in unresolved])
-                    pdf_text = f"GAAP Audit Report: {file_key}\n\nOutstanding Violations:\n{report_summary}\n\nFinal Grade: {grade}"
-                    pdf_path = generate_pdf(f"{file_key} GAAP Audit", pdf_text)
-                    with open(pdf_path, "rb") as f:
-                        st.download_button(
-                            label="📄 Download PDF",
-                            data=f,
-                            file_name=f"{file_key}_GAAP_Audit.pdf",
-                            mime="application/pdf"
-                        )
+            st.markdown("### 🛠 GAAP Violations Checklist")
+            unresolved = handle_violation_checkboxes(file_key, violations, verified_memory)
+
+            grade = calculate_grade(len(unresolved))
+            st.markdown(f"### 📊 Updated GAAP Grade: `{grade}` ({len(unresolved)} unresolved issues)")
+
+            if st.button(f"📥 Download Final PDF for {file_key}"):
+                report_summary = "\n".join([f"- {v}" for v in unresolved])
+                pdf_text = f"GAAP Audit Report: {file_key}\n\nOutstanding Violations:\n{report_summary}\n\nFinal Grade: {grade}"
+                pdf_path = generate_pdf(f"{file_key} GAAP Audit", pdf_text)
+                with open(pdf_path, "rb") as f:
+                    st.download_button(
+                        label="📄 Download PDF",
+                        data=f,
+                        file_name=f"{file_key}_GAAP_Audit.pdf",
+                        mime="application/pdf"
+                    )
