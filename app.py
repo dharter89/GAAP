@@ -1,4 +1,3 @@
-# ⚙️ Must be first Streamlit call
 import streamlit as st
 st.set_page_config(
     page_title="GAAP Compliance Checker (Batch)",
@@ -23,23 +22,37 @@ else:
 # Load OpenAI key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Truncate dataframe to avoid token overflow
+# Smart filter to remove headers, totals, or blank value rows
+def filter_valid_rows(df):
+    numeric_cols = df.select_dtypes(include='number').columns
+    df = df.dropna(subset=numeric_cols, how='all')
+
+    keywords = ['total', 'cost of goods sold', 'income', 'expenses']
+    object_cols = df.select_dtypes(include='object').columns
+
+    if len(object_cols) > 0:
+        df = df[~df[object_cols[0]].astype(str).str.lower().str.contains('|'.join(keywords))]
+
+    if 'Account' in df.columns:
+        df = df[df['Account'].notna() & df['Account'].astype(str).str.strip().ne("")]
+
+    return df
+
 def truncate_df(df, max_rows=50):
     return df.head(max_rows) if df.shape[0] > max_rows else df
 
-# Auto-detect header row or fallback to QuickBooks default row
 DEFAULT_HEADER_ROW = 6
 
 def detect_header_row(df):
     for i, row in df.iterrows():
-        if row.notnull().sum() >= 3:  # Heuristic: valid headers usually have 3+ non-null entries
+        if row.notnull().sum() >= 3:
             return i
     return DEFAULT_HEADER_ROW
 
-# Load Excel file with QB-aware fallback and data cleanup
 def load_excel(file, sheet_name=None):
     try:
         preview = pd.read_excel(file, sheet_name=sheet_name, header=None)
+
         if isinstance(preview, dict):
             sheet_name = list(preview.keys())[0]
             preview = preview[sheet_name]
@@ -60,18 +73,9 @@ def load_excel(file, sheet_name=None):
         st.error(f"❌ Failed to load Excel file: {e}")
         raise
 
-# Generate AI analysis
 @st.cache_data(show_spinner=False)
 def run_single_statement_analysis(df, file_type):
-    df = truncate_df(df)
-    # Pre-clean the DataFrame to remove subtotal and header rows
-    # Try to use the first text column as the "Account" proxy
-    account_col = df.select_dtypes(include='object').columns[0]
-
-    df = df[~df[account_col].astype(str).str.contains("Total", case=False, na=False)]
-    df = df[df.select_dtypes(include=['number']).sum(axis=1) != 0]
-
-
+    df = truncate_df(filter_valid_rows(df))
     prompt = f"""
 You are an Ivy League-trained CPA and GAAP compliance expert.
 
@@ -85,14 +89,10 @@ Analyze the uploaded {file_type} for:
 - Itemize **every** infraction found (not just a few examples)
 
 🧠 Special Instructions:
-- This file was exported from QuickBooks with "Show non-zero rows and columns" enabled.
-- **Ignore any row where the "Account" name contains the word "Total"** — these are subtotal lines added for formatting, not posting accounts.
-- **Ignore any row where all numeric values are zero or blank** — these are usually parent account headers.
-- Only assess rows that include real posting-level amounts or financial classification errors.
-- Do not deduct points for subtotal rows, headers, or grouping lines.
-- Do NOT flag rows as errors if:
-  - The "Account" name contains the word "Total"
-  - The row contains no numeric values or only zeros
+- This file was exported from QuickBooks with "Show non-zero rows/columns" enabled.
+- Ignore any row where the "Account" contains "Total", or the row has no numeric values.
+- Only assess rows that reflect actual posting-level transactions.
+- Do not penalize QuickBooks formatting rows or subtotals.
 
 At the top of your response, assign a GAAP Compliance Grade from A to F:
 - A: Fully compliant, no material issues
@@ -106,7 +106,6 @@ Return your response in clean markdown. Use headers and bullet points.
 Here is the uploaded data:
 {df.to_string(index=False)}
 """
-
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
@@ -115,7 +114,6 @@ Here is the uploaded data:
     )
     return response.choices[0].message.content
 
-# Generate PDF from AI content
 def generate_pdf_report(title, content):
     pdf = FPDF()
     pdf.add_page()
