@@ -2,3 +2,4 @@ streamlit==1.32.2
 pandas
 openpyxl
 openai
+fpdf
