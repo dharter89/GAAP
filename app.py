@@ -13,14 +13,12 @@ import tempfile
 from PIL import Image
 import os
 
-
 # 🏢 Display Valiant Partners Logo
 logo_path = "ValiantLogWhite.png"
 if os.path.exists(logo_path):
     st.image(Image.open(logo_path), width=160)
 else:
     st.warning("⚠️ Company logo not found. Make sure 'ValiantLogWhite.png' is in your repo.")
-
 
 # Load OpenAI key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -32,7 +30,6 @@ def truncate_df(df, max_rows=50):
 # Auto-detect header row or fallback to QuickBooks default row
 DEFAULT_HEADER_ROW = 6
 
-# Tries to detect the first valid header row
 def detect_header_row(df):
     for i, row in df.iterrows():
         if row.notnull().sum() >= 3:  # Heuristic: valid headers usually have 3+ non-null entries
@@ -42,25 +39,18 @@ def detect_header_row(df):
 # Load Excel file with QB-aware fallback and data cleanup
 def load_excel(file, sheet_name=None):
     try:
-        # Load preview without assuming sheet_name is set
         preview = pd.read_excel(file, sheet_name=sheet_name, header=None)
-
-        # If multiple sheets returned, use the first one
         if isinstance(preview, dict):
             sheet_name = list(preview.keys())[0]
             preview = preview[sheet_name]
 
         header_row = detect_header_row(preview)
-
-        # Read the actual data skipping to the detected header
         df = pd.read_excel(file, sheet_name=sheet_name, skiprows=header_row)
 
-        # Clean up the DataFrame
         df.columns = df.columns.astype(str).str.strip()
-        df = df.dropna(axis=1, how='all')  # drop empty cols
-        df = df.dropna(axis=0, how='all')  # drop empty rows
+        df = df.dropna(axis=1, how='all')
+        df = df.dropna(axis=0, how='all')
 
-        # Attempt numeric conversion
         for col in df.select_dtypes(include='object').columns:
             df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "").str.strip(), errors='ignore')
 
@@ -122,7 +112,6 @@ def generate_pdf_report(title, content):
     return temp_file.name
 
 # Streamlit UI
-st.set_page_config(page_title="GAAP Compliance Checker (Batch)", layout="wide")
 st.title("📘 GAAP Compliance Checker - Batch Mode")
 st.caption("Upload and audit multiple statements for GAAP compliance with AI-generated JEs and raw data snapshots.")
 
@@ -151,7 +140,6 @@ if uploaded_files:
                             file_name=f"{file_name.replace(' ', '_')}_GAAP_Audit.pdf",
                             mime="application/pdf"
                         )
-
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
 else:
