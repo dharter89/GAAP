@@ -1,16 +1,26 @@
 import streamlit as st
+
+# ⚙️ Must be first Streamlit call
+st.set_page_config(
+    page_title="GAAP Compliance Checker (Batch)",
+    layout="wide",
+    page_icon="📘"
+)
+
 import pandas as pd
 from openai import OpenAI
 from fpdf import FPDF
 import tempfile
 from PIL import Image
+import os
 
-# Load and display logo
-try:
-    logo = Image.open("ValiantLogWhite.png")
-    st.image(logo, width=180)
-except FileNotFoundError:
+# 🏢 Display Valiant Partners Logo
+logo_path = "ValiantLogWhite.png"
+if os.path.exists(logo_path):
+    st.image(Image.open(logo_path), width=160)
+else:
     st.warning("⚠️ Company logo not found. Make sure 'ValiantLogWhite.png' is in your repo.")
+
 
 # Load OpenAI key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
