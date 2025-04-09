@@ -5,7 +5,7 @@ import openai
 # Securely load API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-def load_excel(file, sheet_name=None):
+def load_excel(file, sheet_name):
     return pd.read_excel(file, sheet_name=sheet_name)
 
 def run_gaap_ai_advisor(bs_df, pl_df, cf_df, gl_df):
@@ -54,10 +54,11 @@ gl_file = st.file_uploader("📜 Upload General Ledger (.xlsx)", type="xlsx")
 
 if all([bs_file, pl_file, cf_file, gl_file]):
     try:
-        bs_df = load_excel(bs_file)
-        pl_df = load_excel(pl_file)
-        cf_df = load_excel(cf_file)
-        gl_df = load_excel(gl_file)
+        bs_df = load_excel(bs_file, sheet_name="Balance Sheet")
+        pl_df = load_excel(pl_file, sheet_name="Profit and Loss")
+        cf_df = load_excel(cf_file, sheet_name="Statement of Cash Flows")
+        gl_df = load_excel(gl_file, sheet_name="General Ledger")
+
 
         st.success("✅ All financial statements uploaded successfully.")
 
