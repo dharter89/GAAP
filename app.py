@@ -65,8 +65,12 @@ def load_excel(file, sheet_name=None):
 def run_single_statement_analysis(df, file_type):
     df = truncate_df(df)
     # Pre-clean the DataFrame to remove subtotal and header rows
-    df = df[~df["Account"].astype(str).str.contains("Total", case=False, na=False)]
+    # Try to use the first text column as the "Account" proxy
+    account_col = df.select_dtypes(include='object').columns[0]
+
+    df = df[~df[account_col].astype(str).str.contains("Total", case=False, na=False)]
     df = df[df.select_dtypes(include=['number']).sum(axis=1) != 0]
+
 
     prompt = f"""
 You are an Ivy League-trained CPA and GAAP compliance expert.
