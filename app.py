@@ -14,6 +14,7 @@ import tempfile
 from PIL import Image
 import os
 
+
 # 🏢 Display Valiant Partners Logo
 logo_path = "ValiantLogWhite.png"
 if os.path.exists(logo_path):
