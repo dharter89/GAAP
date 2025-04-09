@@ -1,143 +1,97 @@
 import streamlit as st
 import pandas as pd
+import openai
 
-# ---------- Helpers ----------
-def parse_numeric(val):
-    if isinstance(val, str):
-        val = val.replace(')', '').replace('(', '-').replace(',', '')
+# Securely load API key from Streamlit secrets
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+def load_excel(file, sheet_name=None):
+    return pd.read_excel(file, sheet_name=sheet_name)
+
+def run_gaap_ai_advisor(bs_df, pl_df, cf_df, gl_df):
+    prompt = f"""
+You are an Ivy League-trained CPA and GAAP compliance expert.
+
+Analyze the following financial data and create a full audit-style report with:
+1. Executive Summary
+2. Section-by-section GAAP findings
+3. Adjusting Journal Entries (AJEs)
+4. GAAP references (ASC codes)
+5. Markdown structure
+
+---
+
+Balance Sheet:
+{bs_df.to_string(index=False)}
+
+Profit and Loss:
+{pl_df.to_string(index=False)}
+
+Cash Flow Statement:
+{cf_df.to_string(index=False)}
+
+General Ledger:
+{gl_df.to_string(index=False)}
+"""
+
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        max_tokens=1800
+    )
+    return response.choices[0].message["content"]
+
+# ------------------- Streamlit UI -------------------
+st.set_page_config(page_title="GAAP Compliance Checker AI", layout="wide")
+st.title("📘 GAAP Compliance Checker")
+st.caption("Upload Balance Sheet, P&L, Cash Flow, and General Ledger for full GAAP analysis.")
+
+bs_file = st.file_uploader("📊 Upload Balance Sheet (.xlsx)", type="xlsx")
+pl_file = st.file_uploader("📈 Upload Profit & Loss (.xlsx)", type="xlsx")
+cf_file = st.file_uploader("💧 Upload Cash Flow Statement (.xlsx)", type="xlsx")
+gl_file = st.file_uploader("📜 Upload General Ledger (.xlsx)", type="xlsx")
+
+if all([bs_file, pl_file, cf_file, gl_file]):
     try:
-        return float(val)
-    except:
-        return None
+        bs_df = load_excel(bs_file)
+        pl_df = load_excel(pl_file)
+        cf_df = load_excel(cf_file)
+        gl_df = load_excel(gl_file)
 
-def load_excel(file, sheet_name, header_row=3):
-    df = pd.read_excel(file, sheet_name=sheet_name)
-    df.columns = df.iloc[header_row]
-    df = df.iloc[header_row + 1:].reset_index(drop=True)
-    df.columns = ["Account", "Balance"]
-    df["Account"] = df["Account"].str.strip()
-    df["Balance"] = df["Balance"].apply(parse_numeric)
-    return df
+        st.success("✅ All financial statements uploaded successfully.")
 
-def check_gaap_issues(bs_df, pl_df, mode="summary"):
-    issues = []
-    ajes = []
+        # Preview uploaded data
+        with st.expander("📂 Preview Uploaded Financial Statements"):
+            tabs = st.tabs(["Balance Sheet", "Profit & Loss", "Cash Flow", "General Ledger"])
+            with tabs[0]:
+                st.write("### 📊 Balance Sheet")
+                st.dataframe(bs_df)
+            with tabs[1]:
+                st.write("### 📈 Profit & Loss")
+                st.dataframe(pl_df)
+            with tabs[2]:
+                st.write("### 💧 Cash Flow Statement")
+                st.dataframe(cf_df)
+            with tabs[3]:
+                st.write("### 📜 General Ledger")
+                st.dataframe(gl_df)
 
-    def explain(entry, note):
-        return f"{entry}\n_Explanation: {note}_"
+        if st.button("🔍 Run AI GAAP Audit Analysis"):
+            with st.spinner("Analyzing with GPT-4..."):
+                report_text = run_gaap_ai_advisor(bs_df, pl_df, cf_df, gl_df)
+                st.markdown("### ✅ AI GAAP Audit Report")
+                st.markdown(report_text)
 
-    # Negative cash balance
-    cash_accounts = bs_df[bs_df["Account"].str.contains("Checking|Bank|United", case=False, na=False)]
-    for _, row in cash_accounts.iterrows():
-        if row["Balance"] < 0:
-            issues.append(
-                explain(
-                    f"🔴 Negative cash in `{row['Account']}`",
-                    "Per ASC 305-10-45, overdrafts should be reclassified as liabilities unless legally offset."
+                # Export full report
+                st.download_button(
+                    label="📄 Export Full AI Report",
+                    data=report_text.encode('utf-8'),
+                    file_name="GAAP_AI_Audit_Report.md",
+                    mime="text/markdown"
                 )
-            )
-            ajes.append({
-                "Debit": "Overdraft Liability",
-                "Credit": row["Account"],
-                "Amount": abs(row["Balance"]),
-                "Memo": "Reclassify overdraft to liability (ASC 305)"
-            })
-
-    # Opening Balance Equity
-    obe = bs_df[bs_df["Account"] == "Opening Balance Equity"]
-    if not obe.empty and abs(obe.iloc[0]["Balance"]) > 1:
-        issues.append(
-            explain(
-                "🟡 Opening Balance Equity not closed",
-                "OBE should be cleared to retained earnings or owner equity before year-end."
-            )
-        )
-        ajes.append({
-            "Debit": "Owner Equity",
-            "Credit": "Opening Balance Equity",
-            "Amount": abs(obe.iloc[0]["Balance"]),
-            "Memo": "Clear OBE to permanent equity"
-        })
-
-    # Clearing Account
-    clearing = bs_df[bs_df["Account"] == "1009 Clearing Account"]
-    if not clearing.empty and abs(clearing.iloc[0]["Balance"]) > 1:
-        issues.append(
-            explain(
-                "🟡 Clearing Account not zero",
-                "Clearing accounts should be reconciled monthly and zeroed out. Open balance may indicate incomplete transactions."
-            )
-        )
-        ajes.append({
-            "Debit": "Suspense Account",
-            "Credit": "1009 Clearing Account",
-            "Amount": abs(clearing.iloc[0]["Balance"]),
-            "Memo": "Investigate and clear clearing account"
-        })
-
-    # Missing expected accruals
-    accrual_flags = ["Payroll", "Depreciation", "Insurance", "Office"]
-    for flag in accrual_flags:
-        if not pl_df["Account"].str.contains(flag, case=False, na=False).any():
-            issues.append(
-                explain(
-                    f"⚠️ Missing expected expense: `{flag}`",
-                    f"Under the matching principle (ASC 450), {flag.lower()} expenses must be accrued if incurred but unpaid."
-                )
-            )
-            if mode == "detailed":
-                ajes.append({
-                    "Debit": f"{flag} Expense",
-                    "Credit": f"Accrued {flag}",
-                    "Amount": 10000,
-                    "Memo": f"Estimate accrual for {flag.lower()}"
-                })
-
-    return issues, pd.DataFrame(ajes)
-
-# ---------- Streamlit UI ----------
-st.set_page_config(page_title="GAAP Compliance Checker", layout="centered")
-st.title("📊 GAAP Compliance Checker")
-st.caption("Upload your Balance Sheet and P&L Excel files to analyze GAAP compliance.")
-
-# Upload controls
-bs_file = st.file_uploader("📥 Upload Balance Sheet (.xlsx)", type="xlsx")
-pl_file = st.file_uploader("📥 Upload Profit & Loss (.xlsx)", type="xlsx")
-
-mode = st.radio("View Mode", ["Summary Mode", "Detailed Mode"])
-
-# File handling
-if bs_file and pl_file:
-    try:
-        bs_df = load_excel(bs_file, sheet_name="Balance Sheet")
-        pl_df = load_excel(pl_file, sheet_name="Profit and Loss")
-
-        st.success("✅ Files loaded successfully.")
-
-        issues, ajes_df = check_gaap_issues(bs_df, pl_df, mode="detailed" if mode == "Detailed Mode" else "summary")
-
-        st.subheader("⚠️ GAAP Issues Detected")
-        if issues:
-            for issue in issues:
-                st.markdown(f"- {issue}")
-        else:
-            st.success("No GAAP violations identified.")
-
-        st.subheader("🧾 Suggested Adjusting Journal Entries")
-        if not ajes_df.empty:
-            st.dataframe(ajes_df)
-
-            csv = ajes_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="⬇️ Download AJEs as CSV",
-                data=csv,
-                file_name="adjusting_journal_entries.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No AJEs required for this upload.")
 
     except Exception as e:
-        st.error(f"❌ Error loading files: {e}")
+        st.error(f"❌ Error processing files: {e}")
 else:
-    st.info("Upload both Balance Sheet and P&L files to begin.")
+    st.info("👆 Upload all 4 required Excel files to begin.")
