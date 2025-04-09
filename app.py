@@ -11,31 +11,40 @@ from fpdf import FPDF
 import tempfile
 from PIL import Image
 import os
+import json
 
 # 🏢 Display Valiant Partners Logo
 logo_path = "ValiantLogWhite.png"
 if os.path.exists(logo_path):
     st.image(Image.open(logo_path), width=160)
 else:
-    st.warning("⚠️ Company logo not found. Make sure 'ValiantLogWhite.png' is in your repo.")
+    st.warning("⚠️ Company logo not found.")
 
-# Load OpenAI key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Smart filter to remove headers, totals, or blank rows
+MEMORY_FILE = "verified_violations.json"
+
+def load_verified_violations():
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            return set(json.load(f))
+    return set()
+
+def save_verified_violations(verified_set):
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(list(verified_set), f)
+
+verified_memory = load_verified_violations()
+
 def filter_valid_rows(df):
     numeric_cols = df.select_dtypes(include='number').columns
     df = df.dropna(subset=numeric_cols, how='all')
-
     keywords = ['total', 'cost of goods sold', 'income', 'expenses']
     object_cols = df.select_dtypes(include='object').columns
-
     if len(object_cols) > 0:
         df = df[~df[object_cols[0]].astype(str).str.lower().str.contains('|'.join(keywords))]
-
     if 'Account' in df.columns:
         df = df[df['Account'].notna() & df['Account'].astype(str).str.strip().ne("")]
-
     return df
 
 def truncate_df(df, max_rows=50):
@@ -52,58 +61,55 @@ def detect_header_row(df):
 def load_excel(file, sheet_name=None):
     try:
         preview = pd.read_excel(file, sheet_name=sheet_name, header=None)
-
         if isinstance(preview, dict):
             sheet_name = list(preview.keys())[0]
             preview = preview[sheet_name]
-
         header_row = detect_header_row(preview)
         df = pd.read_excel(file, sheet_name=sheet_name, skiprows=header_row)
-
         df.columns = df.columns.astype(str).str.strip()
-        df = df.dropna(axis=1, how='all')
-        df = df.dropna(axis=0, how='all')
-
+        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
         for col in df.select_dtypes(include='object').columns:
             df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "").str.strip(), errors='ignore')
-
         return df
-
     except Exception as e:
         st.error(f"❌ Failed to load Excel file: {e}")
         raise
 
+def parse_violations(text):
+    lines = text.split('\n')
+    violations = []
+    capture = False
+    for line in lines:
+        if "GAAP Violations" in line:
+            capture = True
+            continue
+        if line.startswith("###") and capture:
+            break
+        if capture and line.strip().startswith("-"):
+            violation = line.strip("- ").strip()
+            if violation:
+                violations.append(violation)
+    return violations
+
 @st.cache_data(show_spinner=False)
 def run_single_statement_analysis(df, file_type):
     df = truncate_df(filter_valid_rows(df))
-
     prompt = f"""
 You are an Ivy League-trained CPA and GAAP compliance expert.
 
 Analyze the uploaded {file_type} for:
-- GAAP violations
-- Common accounting errors
-- Needed Adjusting Journal Entries (AJEs)
-- References to ASC (GAAP) standards
-- For each issue, include a suggested journal entry (debit/credit, account name, amount)
-- Include an appendix summarizing the raw data rows tied to each issue
-- Itemize **every** infraction found (not just a few examples)
+- GAAP violations (return in bullet list format)
+- Adjusting Journal Entries (AJEs)
+- ASC references
+- Append an "Audit Summary"
 
 🧠 Special Instructions:
-- This file was exported from QuickBooks with "Show non-zero rows/columns" enabled.
-- Ignore any row where the "Account" contains "Total", or the row has no numeric values.
-- Do not penalize header rows, subtotal lines, or formatting-only rows.
-- Accumulated Depreciation is a **contra-asset account** and may appear negative — this is correct GAAP presentation.
-- Other contra accounts like Discounts, Returns, and Refunds may also be negative and are not violations.
+- Format GAAP violations like this: "- Violation: [description]"
+- Do not flag rows with "Total" or without numeric values
+- Accumulated Depreciation and other contra accounts may be negative
+- This file uses "Show non-zero rows" QuickBooks export formatting
 
-At the top of your response, assign a GAAP Compliance Grade from A to F:
-- A: Fully compliant, no material issues
-- B: Minor issues or suggestions
-- C: Moderate GAAP issues, requires adjustments
-- D: Significant errors or recurring issues
-- F: Critical violations, potential misstatements
-
-Return your response in clean markdown. Use headers and bullet points.
+Assign a GAAP Compliance Grade from A–F based on unverified violations.
 
 Here is the uploaded data:
 {df.to_string(index=False)}
@@ -132,9 +138,9 @@ def generate_pdf_report(title, content):
 
 # Streamlit UI
 st.title("📘 GAAP Compliance Checker - Batch Mode")
-st.caption("Upload and audit multiple statements for GAAP compliance with AI-generated JEs and raw data snapshots.")
+st.caption("Upload, audit, verify, and export GAAP analysis with persistent QA memory.")
 
-uploaded_files = st.file_uploader("📤 Upload Financial Statements (.xlsx, .xls)", type=["xlsx", "xls"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("📤 Upload Excel Financial Statements", type=["xlsx", "xls"], accept_multiple_files=True)
 
 if uploaded_files:
     for uploaded_file in uploaded_files:
@@ -147,11 +153,33 @@ if uploaded_files:
 
             if st.button(f"🔍 Run GAAP AI Audit on {file_name}", key=file_name):
                 with st.spinner("Analyzing with AI..."):
-                    audit_report = run_single_statement_analysis(df, file_type)
-                    st.markdown("### ✅ AI Audit Report")
-                    st.markdown(audit_report)
+                    raw_audit = run_single_statement_analysis(df, file_type)
+                    st.markdown("### ✅ Raw AI Audit Report")
+                    st.markdown(raw_audit)
 
-                    pdf_path = generate_pdf_report(f"{file_name} GAAP AI Audit", audit_report)
+                    violations = parse_violations(raw_audit)
+                    st.markdown("### 🛠 GAAP Violation Review")
+
+                    updated_violations = []
+                    for i, v in enumerate(violations):
+                        key = f"{file_name}_v_{i}"
+                        verified = st.checkbox(f"✅ {v}", value=v in verified_memory, key=key)
+                        if verified:
+                            verified_memory.add(v)
+                        else:
+                            updated_violations.append(v)
+
+                    if st.button("🔄 Recalculate Grade & Summary"):
+                        save_verified_violations(verified_memory)
+                        st.success(f"✔️ {len(violations) - len(updated_violations)} marked as verified. {len(updated_violations)} still active.")
+                        if updated_violations:
+                            st.markdown("#### 🧾 Remaining Violations:")
+                            for v in updated_violations:
+                                st.markdown(f"- {v}")
+                        else:
+                            st.markdown("🎉 All violations resolved or dismissed.")
+
+                    pdf_path = generate_pdf_report(f"{file_name} GAAP AI Audit", raw_audit)
                     with open(pdf_path, "rb") as f:
                         st.download_button(
                             label="📄 Download PDF Report",
@@ -159,7 +187,8 @@ if uploaded_files:
                             file_name=f"{file_name.replace(' ', '_')}_GAAP_Audit.pdf",
                             mime="application/pdf"
                         )
+
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
 else:
-    st.info("👆 Please upload one or more financial statements to begin.")
+    st.info("👆 Upload one or more Excel files to begin.")
