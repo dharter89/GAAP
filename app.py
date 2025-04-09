@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
-import openai
+from openai import OpenAI
 
 # Securely load API key from Streamlit secrets
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 def load_excel(file, sheet_name):
     result = pd.read_excel(file, sheet_name=sheet_name)
@@ -11,6 +11,7 @@ def load_excel(file, sheet_name):
         result = result[sheet_name]
     return result
 
+client = OpenAI()  # ✅ must come right after the import
 
 def run_gaap_ai_advisor(bs_df, pl_df, cf_df, gl_df):
     prompt = f"""
@@ -37,14 +38,15 @@ Cash Flow Statement:
 General Ledger:
 {gl_df.to_string(index=False)}
 """
-
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
         max_tokens=1800
     )
-    return response.choices[0].message["content"]
+
+    return response.choices[0].message.content
+
 
 # ------------------- Streamlit UI -------------------
 st.set_page_config(page_title="GAAP Compliance Checker AI", layout="wide")
