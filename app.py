@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from openai import OpenAI
+from fpdf import FPDF
+import tempfile
 
 # Load OpenAI key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -12,17 +14,9 @@ def truncate_df(df, max_rows=50):
 # Load Excel file with sheet logic
 def load_excel(file, sheet_name=None):
     result = pd.read_excel(file, sheet_name=sheet_name)
-    
-    # If a dict is returned (multiple sheets), select the first one unless specified
-    if isinstance(result, dict):
-        if sheet_name:
-            result = result.get(sheet_name)
-        else:
-            # Default to the first sheet if no sheet_name is passed
-            result = next(iter(result.values()))
-    
+    if isinstance(result, dict) and sheet_name:
+        result = result[sheet_name]
     return result
-
 
 # Dynamic prompt builder
 @st.cache_data(show_spinner=False)
@@ -36,7 +30,10 @@ Analyze the uploaded {file_type} for:
 - Common accounting errors
 - Needed Adjusting Journal Entries (AJEs)
 - References to ASC (GAAP) standards
-- Return your response in clean markdown.
+- For each issue, include a suggested journal entry (debit/credit, account name, amount)
+- Include an appendix summarizing the raw data rows tied to each issue
+
+Return your response in clean markdown. Use headers and bullet points.
 
 Here is the uploaded data:
 {df.to_string(index=False)}
@@ -49,36 +46,55 @@ Here is the uploaded data:
     )
     return response.choices[0].message.content
 
+# Generate PDF from AI content
+def generate_pdf_report(title, content):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_font("Arial", size=12)
+
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, title, ln=True)
+    pdf.set_font("Arial", size=12)
+    for line in content.split('\n'):
+        pdf.multi_cell(0, 10, line)
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    pdf.output(temp_file.name)
+    return temp_file.name
+
 # Streamlit UI
-st.set_page_config(page_title="GAAP Compliance Checker (Per File)", layout="wide")
-st.title("📘 GAAP Compliance Checker")
-st.caption("Upload and audit one statement at a time for GAAP compliance.")
+st.set_page_config(page_title="GAAP Compliance Checker (Batch)", layout="wide")
+st.title("📘 GAAP Compliance Checker - Batch Mode")
+st.caption("Upload and audit multiple statements for GAAP compliance with AI-generated JEs and raw data snapshots.")
 
-file_type = st.selectbox("Select the Financial Statement Type", [
-    "Balance Sheet", "Profit and Loss", "Cash Flow", "General Ledger"])
+uploaded_files = st.file_uploader("📤 Upload Financial Statements (.xlsx, .xls)", type=["xlsx", "xls"], accept_multiple_files=True)
 
-uploaded_file = st.file_uploader(f"📤 Upload {file_type} (.xlsx)", type="xlsx")
+if uploaded_files:
+    for uploaded_file in uploaded_files:
+        file_name = uploaded_file.name
+        try:
+            df = load_excel(uploaded_file)
+            file_type = file_name.split("_")[1].replace(".xlsx", "").replace(".xls", "") if "_" in file_name else "Unknown"
+            st.subheader(f"📄 Preview: {file_name}")
+            st.dataframe(df, use_container_width=True)
 
-if uploaded_file:
-    try:
-        df = load_excel(uploaded_file)
-        st.success("✅ File loaded successfully")
-        st.subheader(f"📑 Preview: {file_type}")
-        st.dataframe(df, use_container_width=True)
+            if st.button(f"🔍 Run GAAP AI Audit on {file_name}", key=file_name):
+                with st.spinner("Analyzing with AI..."):
+                    audit_report = run_single_statement_analysis(df, file_type)
+                    st.markdown("### ✅ AI Audit Report")
+                    st.markdown(audit_report)
 
-        if st.button("🔍 Run GAAP AI Audit"):
-            with st.spinner("Analyzing with AI..."):
-                audit_report = run_single_statement_analysis(df, file_type)
-                st.markdown("### ✅ AI Audit Report")
-                st.markdown(audit_report)
-                st.download_button(
-                    label="📄 Export AI Report",
-                    data=audit_report.encode("utf-8"),
-                    file_name=f"{file_type.replace(' ', '_')}_GAAP_Audit.md",
-                    mime="text/markdown"
-                )
+                    pdf_path = generate_pdf_report(f"{file_name} GAAP AI Audit", audit_report)
+                    with open(pdf_path, "rb") as f:
+                        st.download_button(
+                            label="📄 Download PDF Report",
+                            data=f,
+                            file_name=f"{file_name.replace(' ', '_')}_GAAP_Audit.pdf",
+                            mime="application/pdf"
+                        )
 
-    except Exception as e:
-        st.error(f"❌ Error processing file: {e}")
+        except Exception as e:
+            st.error(f"❌ Error processing file: {e}")
 else:
-    st.info("👆 Please upload a financial statement to begin.")
+    st.info("👆 Please upload one or more financial statements to begin.")
