@@ -77,10 +77,11 @@ Analyze the uploaded {file_type} for:
 - Itemize **every** infraction found (not just a few examples)
 
 🧠 Special Instructions:
-- Do **NOT** flag rows as errors if the row contains **no dollar values or all zero values**. These are likely header rows or section titles from QuickBooks.
-- The exported data uses the **“Show non-zero rows/columns”** option. So blank or zero-only rows are likely intentional formatting elements.
-- Only assess rows that contain financial figures and reflect actual posting-level detail.
-- Do not deduct points for section headers or subtotal lines that have no amounts.
+- This file was exported from QuickBooks with "Show non-zero rows and columns" enabled.
+- **Ignore any row where the "Account" name contains the word "Total"** — these are subtotal lines added for formatting, not posting accounts.
+- **Ignore any row where all numeric values are zero or blank** — these are usually parent account headers.
+- Only assess rows that include real posting-level amounts or financial classification errors.
+- Do not deduct points for subtotal rows, headers, or grouping lines.
 
 At the top of your response, assign a GAAP Compliance Grade from A to F:
 - A: Fully compliant, no material issues
@@ -94,6 +95,7 @@ Return your response in clean markdown. Use headers and bullet points.
 Here is the uploaded data:
 {df.to_string(index=False)}
 """
+
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
