@@ -22,7 +22,7 @@ else:
 # Load OpenAI key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Smart filter to remove headers, totals, or blank value rows
+# Smart filter to remove headers, totals, or blank rows
 def filter_valid_rows(df):
     numeric_cols = df.select_dtypes(include='number').columns
     df = df.dropna(subset=numeric_cols, how='all')
@@ -76,6 +76,7 @@ def load_excel(file, sheet_name=None):
 @st.cache_data(show_spinner=False)
 def run_single_statement_analysis(df, file_type):
     df = truncate_df(filter_valid_rows(df))
+
     prompt = f"""
 You are an Ivy League-trained CPA and GAAP compliance expert.
 
@@ -91,8 +92,9 @@ Analyze the uploaded {file_type} for:
 🧠 Special Instructions:
 - This file was exported from QuickBooks with "Show non-zero rows/columns" enabled.
 - Ignore any row where the "Account" contains "Total", or the row has no numeric values.
-- Only assess rows that reflect actual posting-level transactions.
-- Do not penalize QuickBooks formatting rows or subtotals.
+- Do not penalize header rows, subtotal lines, or formatting-only rows.
+- Accumulated Depreciation is a **contra-asset account** and may appear negative — this is correct GAAP presentation.
+- Other contra accounts like Discounts, Returns, and Refunds may also be negative and are not violations.
 
 At the top of your response, assign a GAAP Compliance Grade from A to F:
 - A: Fully compliant, no material issues
