@@ -5,10 +5,15 @@ from openai import OpenAI
 
 from gaap_audit.utils import (
     load_verified_memory, clean_df, generate_pdf,
-    calculate_grade, save_verified_memory
+    calculate_grade, save_verified_memory, load_vendor_memory
 )
 from gaap_audit.ai import run_gaap_audit
-from gaap_audit.ui import handle_violation_checkboxes
+from gaap_audit.ui import (
+    handle_violation_checkboxes,
+    show_vendor_mismatches,
+    resolve_vendor_accounts  # ✅ make sure this is added!
+)
+
 
 st.set_page_config(page_title="GAAP Checker", layout="wide", page_icon="📘")
 
@@ -16,7 +21,9 @@ if os.path.exists("ValiantLogWhite.png"):
     st.image("ValiantLogWhite.png", width=160)
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 verified_memory = load_verified_memory()
+vendor_memory = load_vendor_memory()
 
 st.title("📘 GAAP Compliance Checker - Batch Mode")
 st.caption("Audit files, review GAAP issues, verify false positives, and export clean summaries.")
@@ -30,9 +37,10 @@ if files:
         df = pd.read_excel(f)
         df_clean = clean_df(df)
         st.dataframe(df_clean, use_container_width=True)
+        vendor_memory = resolve_vendor_accounts(df_clean, vendor_memory)
+        show_vendor_mismatches(df_clean)
 
         audit_state_key = f"{file_key}_audit"
-
         if audit_state_key not in st.session_state:
             if st.button(f"🔍 Run GAAP Audit on {file_key}"):
                 with st.spinner("Analyzing with GPT..."):

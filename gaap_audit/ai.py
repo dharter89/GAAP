@@ -1,5 +1,3 @@
-# gaap_audit/ai.py
-
 from gaap_audit.utils import clean_df, truncate_df
 
 def run_gaap_audit(client, df, file_type):
