@@ -1,5 +1,5 @@
 import streamlit as st
-from gaap_audit.utils import save_verified_memory, load_vendor_memory
+from gaap_audit.utils import save_verified_memory, load_vendor_memory, save_vendor_memory
 
 def handle_violation_checkboxes(file_key, violations, verified_memory):
     session_key = f"verified::{file_key}"
@@ -43,3 +43,29 @@ def show_vendor_mismatches(df):
             st.markdown(f"- **{vendor}** was booked to `{used}` but should be `{correct}`")
     else:
         st.markdown("✅ No vendor misclassifications detected.")
+
+def resolve_vendor_accounts(df, vendor_memory):
+    st.markdown("### 🧾 Vendor Classification Review")
+    vendor_col = "Vendor"
+    account_col = "Account"
+
+    if vendor_col not in df.columns or account_col not in df.columns:
+        st.warning("Missing 'Vendor' or 'Account' columns.")
+        return vendor_memory
+
+    for vendor in df[vendor_col].dropna().unique():
+        entries = df[df[vendor_col] == vendor]
+        accounts_used = entries[account_col].dropna().unique().tolist()
+
+        if len(accounts_used) > 1:
+            st.markdown(f"⚠️ `{vendor}` used multiple accounts: {accounts_used}")
+            selected = st.selectbox(
+                f"Select correct account for '{vendor}'", options=accounts_used, key=f"correct::{vendor}"
+            )
+            vendor_memory[vendor] = selected
+        elif len(accounts_used) == 1:
+            vendor_memory[vendor] = accounts_used[0]
+
+    save_vendor_memory(vendor_memory)
+    return vendor_memory
+
