@@ -5,3 +5,4 @@ fpdf>=1.7
 pillow>=10.0
 openpyxl
 google-genai>=1.27.0
+tabulate
