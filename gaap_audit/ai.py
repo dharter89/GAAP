@@ -19,7 +19,10 @@ def run_gaap_audit(df, file_type):
     # ——————————————————————————————————————
     # 0) Load GCP creds from Streamlit secrets (cloud) or use local path (dev)
     if "GCP_CREDENTIALS" in st.secrets:
-        creds = st.secrets["GCP_CREDENTIALS"]
+        # Convert the SecretsSection into a plain dict of strings
+        raw_secs    = st.secrets["GCP_CREDENTIALS"]
+        creds = {k: raw_secs[k] for k in raw_secs}    
+
         tf = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
         tf.write(json.dumps(creds).encode("utf-8"))
         tf.flush()
