@@ -77,3 +77,29 @@ if uploaded_docs:
 
         # 6) persist memory if you like
         save_verified_memory(vendor_mem)
+
+def handle_violation_checkboxes(file_key, violations, verified_memory):
+    """
+    Render a checkbox for each violation, track selections in session_state.
+    """
+    for idx, v in enumerate(violations):
+        key = f"verified::{file_key}::{idx}"
+        default = False
+        if file_key in verified_memory:
+            default = verified_memory[file_key].get(idx, False)
+        checked = st.checkbox(f"{v.get('location','')} - {v.get('summary','')}", key=key, value=default)
+        # store the user choice
+        st.session_state.setdefault('verified', {}).setdefault(file_key, {})[idx] = checked
+    return st.session_state.get('verified', {}).get(file_key, {})
+def show_vendor_mismatches(df_clean):
+    """
+    Placeholder for vendor mismatch display.  Customize as needed.
+    """
+    st.info("Vendor mismatch checking is not yet implemented.")
+
+
+def resolve_vendor_accounts(df_clean, vendor_memory):
+    """
+    Placeholder for resolving vendor accounts into memory. Returns passed memory.
+    """
+    return vendor_memory
