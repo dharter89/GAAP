@@ -3,6 +3,9 @@
 import os
 import re
 import json
+import tempfile
+
+import streamlit as st
 from google import genai
 from gaap_audit.utils import clean_df, truncate_df
 
@@ -13,26 +16,36 @@ def run_gaap_audit(df, file_type):
     Returns the raw JSON/text, a compliance grade, and a list of violation dicts.
     """
 
-    # 1) Point the SDK to your service-account key
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
-        r"C:\Users\DavidHarter\OneDrive - Valiant Partners LLC"
-        r"\VP Drive\7. Drive Templates\Python\GAAP\Credentials\Gemini"
-        r"\gemini-demo-467504-ca7268cb4985.json"
-    )
+    # ——————————————————————————————————————
+    # 0) Load GCP creds from Streamlit secrets (cloud) or use local path (dev)
+    if "GCP_CREDENTIALS" in st.secrets:
+        creds = st.secrets["GCP_CREDENTIALS"]
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+        tf.write(json.dumps(creds).encode("utf-8"))
+        tf.flush()
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tf.name
+    else:
+        # fallback for local development—your existing service‐account JSON
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
+            r"C:\Users\DavidHarter\OneDrive - Valiant Partners LLC"
+            r"\VP Drive\7. Drive Templates\Python\GAAP\Credentials\Gemini"
+            r"\gemini-demo-467504-ca7268cb4985.json"
+        )
+    # ——————————————————————————————————————
 
-    # 2) Initialize the Vertex AI client
+    # 1) Initialize the Vertex AI client
     client = genai.Client(
         vertexai=True,
         project="gemini-demo-467504",
         location="us-central1",
     )
 
-    # 3) Clean and truncate the DataFrame, then convert to Markdown
+    # 2) Clean and truncate the DataFrame, then convert to Markdown
     df_cleaned = clean_df(df)
     df_small   = truncate_df(df_cleaned)
     ledger_md  = df_small.to_markdown(index=False)
 
-    # 4) Build a prompt that forces *all* violations to be listed + counted
+    # 3) Build a prompt that forces *all* violations to be listed + counted
     prompt = f"""
 You are the world’s most meticulous CPA and GAAP auditor.
 
@@ -40,7 +53,7 @@ Below is a sample general ledger in Markdown table form:
 
 {ledger_md}
 
---
+--  
 **Audit Instructions**  
 1. Review **every** row for classification, disclosure, or GAAP deviations.  
 2. For **each** violation you find, begin the line with **Violation:** and give a one-sentence summary.  
@@ -66,13 +79,13 @@ Respond in JSON with this schema:
 }}
 ```"""
 
-    # 5) Send to Gemini
+    # 4) Send to Gemini
     response = client.models.generate_content(
         model="gemini-2.5-pro",
         contents=prompt
     )
 
-    # 6) Parse the JSON (with robust stripping of fences)
+    # 5) Parse the JSON (with robust stripping of fences)
     full_text = response.text
     raw = full_text
 
@@ -93,5 +106,5 @@ Respond in JSON with this schema:
         grade      = None
         violations = []
 
-    # 7) Return the raw output, the extracted grade, and the violation list
+    # 6) Return the raw output, the extracted grade, and the violation list
     return full_text, grade, violations
