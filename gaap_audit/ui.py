@@ -2,6 +2,7 @@
 
 import sys, os, json
 import streamlit as st
+import pandas
 import pandas as pd
 
 # make sure the gaap_audit package is on the path
@@ -78,28 +79,64 @@ if uploaded_docs:
         # 6) persist memory if you like
         save_verified_memory(vendor_mem)
 
-def handle_violation_checkboxes(file_key, violations, verified_memory):
+def handle_violation_checkboxes(file_key: str,
+                                violations: list[dict],
+                                verified_memory: dict) -> dict:
     """
-    Render a checkbox for each violation, track selections in session_state.
+    Render a checkbox for each violation, track selections in session_state,
+    and update verified_memory[file_key] accordingly.
+    Returns the updated verified_memory[file_key] dict.
     """
     for idx, v in enumerate(violations):
         key = f"verified::{file_key}::{idx}"
         default = False
         if file_key in verified_memory:
             default = verified_memory[file_key].get(idx, False)
-        checked = st.checkbox(f"{v.get('location','')} - {v.get('summary','')}", key=key, value=default)
-        # store the user choice
-        st.session_state.setdefault('verified', {}).setdefault(file_key, {})[idx] = checked
-    return st.session_state.get('verified', {}).get(file_key, {})
-def show_vendor_mismatches(df_clean):
-    """
-    Placeholder for vendor mismatch display.  Customize as needed.
-    """
-    st.info("Vendor mismatch checking is not yet implemented.")
+
+        checked = st.checkbox(
+            f"{v.get('location','N/A')} – {v.get('summary','(no summary)')}",
+            key=key,
+            value=default,
+        )
+
+        # persist choice back into memory
+        verified_memory.setdefault(file_key, {})[idx] = checked
+
+    return verified_memory[file_key]
 
 
-def resolve_vendor_accounts(df_clean, vendor_memory):
+def show_vendor_mismatches(vendor_memory: dict,
+                           violations: list[dict]) -> None:
     """
-    Placeholder for resolving vendor accounts into memory. Returns passed memory.
+    Compare each violation’s suggested_correction against any prior
+    mapping in vendor_memory, and display a warning if they differ.
     """
+    st.subheader("🔄 Vendor Mismatch Warnings")
+    found_mismatch = False
+
+    for v in violations:
+        vendor    = v.get("vendor_name") or v.get("location", "")
+        new_sugg  = v.get("suggested_correction", "")
+        prev_sugg = vendor_memory.get(vendor)
+
+        if prev_sugg and prev_sugg != new_sugg:
+            st.warning(
+                f"Vendor **{vendor}** was previously classified as **{prev_sugg}**,\n"
+                f"but now suggested: **{new_sugg}**."
+            )
+            found_mismatch = True
+
+    if not found_mismatch:
+        st.info("No vendor-mismatch issues detected.")
+
+
+def resolve_vendor_accounts(vendor_memory: dict,
+                            df_clean: pd.DataFrame) -> dict:
+    """
+    Placeholder for vendor-memory resolution logic.
+    E.g. you might present a selectbox per unique vendor
+    and update vendor_memory accordingly.
+    For now, simply return vendor_memory unmodified.
+    """
+    # TODO: implement interactive resolution
     return vendor_memory
