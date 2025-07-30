@@ -56,9 +56,10 @@ if files:
             if st.button(f"🔍 Run GAAP Audit on {file_key}"):
                 with st.spinner("Analyzing for GAAP compliance…"):
                     # call Gemini-based helper (two args)
-                    audit_text, violations = run_gaap_audit(df_clean, "General Ledger")
+                    full_text, grade, violations = run_gaap_audit(df_clean, "General Ledger")
                     st.session_state[audit_state_key] = {
                         "text": audit_text,
+                        "grade": grade,
                         "violations": violations
                     }
 
