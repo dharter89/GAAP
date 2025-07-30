@@ -44,7 +44,7 @@ if files:
         if audit_state_key not in st.session_state:
             if st.button(f"🔍 Run GAAP Audit on {file_key}"):
                 with st.spinner("Analyzing with GPT..."):
-                    audit_text, violations = run_gaap_audit(client, df_clean, "General Ledger")
+                    audit_text, violations = run_gaap_audit(df_clean, "General Ledger")
                     st.session_state[audit_state_key] = {
                         "text": audit_text,
                         "violations": violations
