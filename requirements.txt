@@ -1,0 +1,7 @@
+streamlit>=1.32
+pandas>=2.0
+openai>=1.0
+fpdf>=1.7
+pillow>=10.0
+openpyxl
+google-genai>=1.27.0
